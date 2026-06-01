@@ -323,8 +323,16 @@ function App() {
   return (
     <div className={`min-h-screen flex flex-col md:flex-row transition-all duration-300 ${darkMode ? 'bg-[#0a0f1e] text-slate-200' : 'bg-[#f8fafc] text-slate-800'}`}>
       
+      {/* Mobile Sidebar Backdrop */}
+      {sidebarOpen && (
+        <div 
+          className="fixed inset-0 bg-black/60 backdrop-blur-sm z-30 md:hidden animate-fade-in"
+          onClick={() => setSidebarOpen(false)}
+        />
+      )}
+
       {/* 1. SIDEBAR (190px fixed on desktop) */}
-      <aside className={`fixed top-0 bottom-0 left-0 z-40 w-[190px] border-r ${borderStyle} ${glassStyle} transition-transform md:translate-x-0 ${sidebarOpen ? 'translate-x-0' : '-translate-x-full'} flex flex-col justify-between p-4`}>
+      <aside className={`fixed top-0 bottom-0 left-0 z-40 w-[190px] border-r ${borderStyle} ${darkMode ? 'bg-[#0a0f1e] md:bg-transparent' : 'bg-[#f8fafc] md:bg-transparent'} ${glassStyle} transition-transform duration-300 md:translate-x-0 ${sidebarOpen ? 'translate-x-0 shadow-2xl' : '-translate-x-full'} flex flex-col justify-between p-4`}>
         <div>
           {/* Logo & Header */}
           <div className="flex items-center gap-2 mb-6">
