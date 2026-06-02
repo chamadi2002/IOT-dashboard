@@ -46,6 +46,8 @@ import {
 } from 'recharts';
 import { useFirebaseData } from './useFirebaseData';
 import Login from './Login';
+import { ref, update } from 'firebase/database';
+import { db } from './firebase';
 
 function App() {
   // --- STATE ---
@@ -76,19 +78,12 @@ function App() {
 
   // --- DEVICES STATE ---
   const [devices, setDevices] = useState([
-    { id: 'DEV-001', name: 'Thermostat-01', zone: 'Zone A', status: 'online', battery: 85, signal: 4, type: 'temperature', value: '22.4°C' },
-    { id: 'DEV-002', name: 'Humidity-02', zone: 'Zone B', status: 'online', battery: 45, signal: 5, type: 'humidity', value: '52.8%' },
-    { id: 'DEV-003', name: 'GasSensor-03', zone: 'Zone A', status: 'warning', battery: 18, signal: 3, type: 'gas', value: '310 ppm' },
-    { id: 'DEV-004', name: 'AQISensor-04', zone: 'Zone C', status: 'offline', battery: 0, signal: 0, type: 'aqi', value: '0 ppm' },
-    { id: 'DEV-005', name: 'Pressure-05', zone: 'Zone B', status: 'online', battery: 92, signal: 4, type: 'pressure', value: '1013 hPa' }
+
   ]);
 
   // --- ALERTS STATE ---
   const [alerts, setAlerts] = useState([
-    { id: 101, type: 'High Gas Level detected', device: 'GasSensor-03', severity: 'Warning', time: '10:25:30 AM', status: 'Active' },
-    { id: 102, type: 'Sensor Disconnected', device: 'AQISensor-04', severity: 'Critical', time: '10:14:15 AM', status: 'Active' },
-    { id: 103, type: 'Low Battery Warning', device: 'GasSensor-03', severity: 'Warning', time: '09:42:10 AM', status: 'Acknowledged' },
-    { id: 104, type: 'System Reboot', device: 'Thermostat-01', severity: 'Normal', time: '08:00:00 AM', status: 'Resolved' }
+
   ]);
 
   // --- RECENT ACTIVITY STATE ---
@@ -179,16 +174,16 @@ function App() {
         setAlerts(prev => {
           const newAlerts = fbAlerts.filter(fa => !prev.find(pa => pa.id === fa.id));
           if (newAlerts.length > 0) {
-             // Add new alerts to the activities log
-             setActivities(act => [
-               ...newAlerts.map(a => ({
-                 id: Date.now() + Math.random(),
-                 type: a.severity === 'Critical' ? 'red' : 'amber',
-                 text: `Alert triggered: ${a.device} ${a.type}`,
-                 time: 'Just now'
-               })),
-               ...act
-             ]);
+            // Add new alerts to the activities log
+            setActivities(act => [
+              ...newAlerts.map(a => ({
+                id: Date.now() + Math.random(),
+                type: a.severity === 'Critical' ? 'red' : 'amber',
+                text: `Alert triggered: ${a.device} ${a.type}`,
+                time: 'Just now'
+              })),
+              ...act
+            ]);
           }
           return [...newAlerts, ...prev];
         });
@@ -209,7 +204,7 @@ function App() {
           return updatedDevices;
         });
       }
-      
+
       setLastSyncTime(new Date());
     }
   }, [fbTelemetry, fbDevices, fbAlerts, loading]);
@@ -251,7 +246,7 @@ function App() {
     setDevices(prev => prev.map(d => {
       if (d.id === deviceId) {
         const nextStatus = d.status === 'online' ? 'offline' : 'online';
-        
+
         // update telemetry device count
         setTelemetry(t => {
           const change = nextStatus === 'online' ? 1 : -1;
@@ -272,10 +267,18 @@ function App() {
           ...act
         ]);
 
+        const nextBattery = nextStatus === 'offline' ? 0 : d.battery === 0 ? 80 : d.battery;
+
+        // Update Firebase
+        update(ref(db, `devices/${deviceId}`), {
+          status: nextStatus,
+          battery: nextBattery
+        }).catch(err => console.error("Error updating device status in Firebase:", err));
+
         return {
           ...d,
           status: nextStatus,
-          battery: nextStatus === 'offline' ? 0 : d.battery === 0 ? 80 : d.battery,
+          battery: nextBattery,
           signal: nextStatus === 'offline' ? 0 : 4
         };
       }
@@ -322,10 +325,10 @@ function App() {
 
   return (
     <div className={`min-h-screen flex flex-col md:flex-row transition-all duration-300 ${darkMode ? 'bg-[#0a0f1e] text-slate-200' : 'bg-[#f8fafc] text-slate-800'}`}>
-      
+
       {/* Mobile Sidebar Backdrop */}
       {sidebarOpen && (
-        <div 
+        <div
           className="fixed inset-0 bg-black/60 backdrop-blur-sm z-30 md:hidden animate-fade-in"
           onClick={() => setSidebarOpen(false)}
         />
@@ -367,11 +370,10 @@ function App() {
                     setActiveTab(item.name);
                     setSidebarOpen(false);
                   }}
-                  className={`w-full flex items-center justify-between px-3 py-2 rounded-lg text-xs font-medium transition-all ${
-                    isActive 
-                      ? 'bg-blue-600/15 text-blue-400 border-l-2 border-blue-500' 
-                      : 'hover:bg-slate-500/10 text-slate-400 hover:text-slate-200'
-                  }`}
+                  className={`w-full flex items-center justify-between px-3 py-2 rounded-lg text-xs font-medium transition-all ${isActive
+                    ? 'bg-blue-600/15 text-blue-400 border-l-2 border-blue-500'
+                    : 'hover:bg-slate-500/10 text-slate-400 hover:text-slate-200'
+                    }`}
                 >
                   <div className="flex items-center gap-2">
                     <Icon className={`w-4 h-4 ${isActive ? 'text-blue-400' : 'text-slate-400'}`} />
@@ -379,11 +381,10 @@ function App() {
                   </div>
                   <div className="flex items-center gap-1.5">
                     {item.badge !== undefined && (
-                      <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-bold ${
-                        item.name === 'Alerts' && activeAlertsCount > 0
-                          ? 'bg-red-500/20 text-red-400'
-                          : 'bg-slate-500/20 text-slate-400'
-                      }`}>
+                      <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-bold ${item.name === 'Alerts' && activeAlertsCount > 0
+                        ? 'bg-red-500/20 text-red-400'
+                        : 'bg-slate-500/20 text-slate-400'
+                        }`}>
                         {item.badge}
                       </span>
                     )}
@@ -425,18 +426,18 @@ function App() {
 
       {/* Main content area */}
       <main className="flex-1 md:pl-[190px] flex flex-col min-h-screen">
-        
+
         {/* 2. TOP HEADER */}
         <header className={`sticky top-0 z-30 border-b ${borderStyle} ${glassStyle} px-4 py-3 flex items-center justify-between`}>
           <div className="flex items-center gap-3">
             {/* Mobile Sidebar Hamburger Toggle */}
-            <button 
+            <button
               onClick={() => setSidebarOpen(true)}
               className="md:hidden p-1.5 rounded-lg hover:bg-slate-500/10 text-slate-400"
             >
               <Menu className="w-5 h-5" />
             </button>
-            
+
             <div>
               <h1 className="text-sm md:text-base font-bold tracking-tight m-0 flex items-center gap-2">
                 IoT Monitoring System
@@ -459,11 +460,10 @@ function App() {
             <select
               value={selectedDevice}
               onChange={(e) => setSelectedDevice(e.target.value)}
-              className={`text-xs px-3 py-1.5 rounded-lg border font-medium outline-none transition-all cursor-pointer ${
-                darkMode 
-                  ? 'bg-slate-800/80 border-slate-700 text-slate-200 hover:bg-slate-700' 
-                  : 'bg-white border-slate-200 text-slate-800 hover:bg-slate-50'
-              }`}
+              className={`text-xs px-3 py-1.5 rounded-lg border font-medium outline-none transition-all cursor-pointer ${darkMode
+                ? 'bg-slate-800/80 border-slate-700 text-slate-200 hover:bg-slate-700'
+                : 'bg-white border-slate-200 text-slate-800 hover:bg-slate-50'
+                }`}
             >
               {fbDevices.length > 0 ? (
                 fbDevices.map(d => (
@@ -475,7 +475,7 @@ function App() {
             </select>
 
             {/* Dark/Light mode toggle */}
-            <button 
+            <button
               onClick={() => setDarkMode(!darkMode)}
               className="p-2 rounded-lg hover:bg-slate-500/10 text-slate-400 hover:text-slate-200 transition-colors"
               title={darkMode ? "Switch to Light Mode" : "Switch to Dark Mode"}
@@ -485,7 +485,7 @@ function App() {
 
             {/* Notifications panel toggle */}
             <div className="relative">
-              <button 
+              <button
                 onClick={() => setShowNotifications(!showNotifications)}
                 className="p-2 rounded-lg hover:bg-slate-500/10 text-slate-400 hover:text-slate-200 transition-colors relative"
               >
@@ -499,7 +499,7 @@ function App() {
                 <div className={`absolute right-0 mt-2 w-72 rounded-xl shadow-xl border ${borderStyle} p-3 z-50 ${darkMode ? 'bg-[#0f172a] text-slate-200' : 'bg-white text-slate-800'}`}>
                   <div className="flex justify-between items-center pb-2 mb-2 border-b border-slate-500/10">
                     <span className="text-xs font-bold font-heading">Notifications</span>
-                    <button 
+                    <button
                       onClick={handleMarkAllNotificationsRead}
                       className="text-[10px] text-blue-500 hover:underline"
                     >
@@ -627,7 +627,7 @@ function App() {
 
               {/* 4. REAL-TIME TREND CHARTS & STAT SUMMARY */}
               <section className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-                
+
                 {/* Trends Container */}
                 <div className={`lg:col-span-2 p-5 rounded-xl shadow-lg ${glassStyle} flex flex-col space-y-4`}>
                   <div className="flex justify-between items-center">
@@ -642,11 +642,10 @@ function App() {
                         <button
                           key={period}
                           onClick={() => setTimePeriod(period)}
-                          className={`text-xs px-3 py-1.5 rounded-md font-bold transition-all ${
-                            timePeriod === period 
-                              ? 'bg-blue-600 text-white shadow-sm' 
-                              : 'text-slate-400 hover:text-slate-200'
-                          }`}
+                          className={`text-xs px-3 py-1.5 rounded-md font-bold transition-all ${timePeriod === period
+                            ? 'bg-blue-600 text-white shadow-sm'
+                            : 'text-slate-400 hover:text-slate-200'
+                            }`}
                         >
                           {period}
                         </button>
@@ -667,8 +666,8 @@ function App() {
                           <AreaChart data={currentChartSet} margin={{ top: 5, right: 5, left: -25, bottom: 0 }}>
                             <defs>
                               <linearGradient id="colorTemp" x1="0" y1="0" x2="0" y2="1">
-                                <stop offset="5%" stopColor="#f97316" stopOpacity={0.4}/>
-                                <stop offset="95%" stopColor="#f97316" stopOpacity={0}/>
+                                <stop offset="5%" stopColor="#f97316" stopOpacity={0.4} />
+                                <stop offset="95%" stopColor="#f97316" stopOpacity={0} />
                               </linearGradient>
                             </defs>
                             <CartesianGrid strokeDasharray="3 3" vertical={false} stroke={darkMode ? "rgba(255,255,255,0.05)" : "rgba(0,0,0,0.05)"} />
@@ -692,8 +691,8 @@ function App() {
                           <AreaChart data={currentChartSet} margin={{ top: 5, right: 5, left: -25, bottom: 0 }}>
                             <defs>
                               <linearGradient id="colorHum" x1="0" y1="0" x2="0" y2="1">
-                                <stop offset="5%" stopColor="#06b6d4" stopOpacity={0.4}/>
-                                <stop offset="95%" stopColor="#06b6d4" stopOpacity={0}/>
+                                <stop offset="5%" stopColor="#06b6d4" stopOpacity={0.4} />
+                                <stop offset="95%" stopColor="#06b6d4" stopOpacity={0} />
                               </linearGradient>
                             </defs>
                             <CartesianGrid strokeDasharray="3 3" vertical={false} stroke={darkMode ? "rgba(255,255,255,0.05)" : "rgba(0,0,0,0.05)"} />
@@ -717,8 +716,8 @@ function App() {
                           <AreaChart data={currentChartSet} margin={{ top: 5, right: 5, left: -25, bottom: 0 }}>
                             <defs>
                               <linearGradient id="colorGas" x1="0" y1="0" x2="0" y2="1">
-                                <stop offset="5%" stopColor="#a855f7" stopOpacity={0.4}/>
-                                <stop offset="95%" stopColor="#a855f7" stopOpacity={0}/>
+                                <stop offset="5%" stopColor="#a855f7" stopOpacity={0.4} />
+                                <stop offset="95%" stopColor="#a855f7" stopOpacity={0} />
                               </linearGradient>
                             </defs>
                             <CartesianGrid strokeDasharray="3 3" vertical={false} stroke={darkMode ? "rgba(255,255,255,0.05)" : "rgba(0,0,0,0.05)"} />
@@ -769,7 +768,7 @@ function App() {
 
               {/* DEVICE STATUS & ALERT CENTER */}
               <section className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-                
+
                 {/* 5. DEVICE STATUS PANEL */}
                 <div className={`lg:col-span-2 p-5 rounded-xl shadow-lg ${glassStyle} flex flex-col space-y-4`}>
                   <div className="flex justify-between items-center">
@@ -777,7 +776,7 @@ function App() {
                       <h3 className="font-heading font-bold text-base m-0">Live Device Status</h3>
                       <p className="text-xs text-slate-500">Active sensors & connectivity logs</p>
                     </div>
-                    <button 
+                    <button
                       onClick={handleAddDevice}
                       className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold bg-blue-600 hover:bg-blue-500 text-white rounded-lg shadow transition-all"
                     >
@@ -812,10 +811,9 @@ function App() {
                                     {isOnline && <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75"></span>}
                                     {isWarning && <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-amber-400 opacity-75"></span>}
                                     {isOffline && <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75"></span>}
-                                    
-                                    <span className={`relative inline-flex rounded-full h-2 w-2 ${
-                                      isOnline ? 'bg-green-500 glow-green' : isWarning ? 'bg-amber-500 glow-amber' : 'bg-red-500 glow-red'
-                                    }`}></span>
+
+                                    <span className={`relative inline-flex rounded-full h-2 w-2 ${isOnline ? 'bg-green-500 glow-green' : isWarning ? 'bg-amber-500 glow-amber' : 'bg-red-500 glow-red'
+                                      }`}></span>
                                   </span>
                                   <span>{device.name}</span>
                                 </div>
@@ -823,22 +821,19 @@ function App() {
                               </td>
                               <td className="py-2.5 text-slate-400">{device.zone}</td>
                               <td className="py-2.5">
-                                <span className={`text-[10px] font-bold uppercase ${
-                                  isOnline ? 'text-green-400' : isWarning ? 'text-amber-400' : 'text-red-400'
-                                }`}>
+                                <span className={`text-[10px] font-bold uppercase ${isOnline ? 'text-green-400' : isWarning ? 'text-amber-400' : 'text-red-400'
+                                  }`}>
                                   {device.status}
                                 </span>
                               </td>
                               <td className="py-2.5">
                                 <div className="flex items-center gap-1.5">
-                                  <Battery className={`w-3.5 h-3.5 ${
-                                    device.battery > 50 ? 'text-green-400' : device.battery > 25 ? 'text-amber-400' : 'text-red-400'
-                                  }`} />
+                                  <Battery className={`w-3.5 h-3.5 ${device.battery > 50 ? 'text-green-400' : device.battery > 25 ? 'text-amber-400' : 'text-red-400'
+                                    }`} />
                                   <div className="w-12 bg-slate-500/20 h-1.5 rounded-full overflow-hidden">
-                                    <div 
-                                      className={`h-full rounded-full ${
-                                        device.battery > 50 ? 'bg-green-500' : device.battery > 25 ? 'bg-amber-500' : 'bg-red-500'
-                                      }`} 
+                                    <div
+                                      className={`h-full rounded-full ${device.battery > 50 ? 'bg-green-500' : device.battery > 25 ? 'bg-amber-500' : 'bg-red-500'
+                                        }`}
                                       style={{ width: `${device.battery}%` }}
                                     ></div>
                                   </div>
@@ -848,13 +843,12 @@ function App() {
                               <td className="py-2.5">
                                 <div className="flex items-end justify-center gap-0.5 h-3">
                                   {[1, 2, 3, 4, 5].map(bar => (
-                                    <span 
-                                      key={bar} 
-                                      className={`w-0.5 rounded-full ${
-                                        bar <= device.signal 
-                                          ? device.signal >= 4 ? 'bg-green-500' : device.signal >= 3 ? 'bg-amber-500' : 'bg-red-500'
-                                          : 'bg-slate-500/20'
-                                      }`} 
+                                    <span
+                                      key={bar}
+                                      className={`w-0.5 rounded-full ${bar <= device.signal
+                                        ? device.signal >= 4 ? 'bg-green-500' : device.signal >= 3 ? 'bg-amber-500' : 'bg-red-500'
+                                        : 'bg-slate-500/20'
+                                        }`}
                                       style={{ height: `${bar * 20}%` }}
                                     ></span>
                                   ))}
@@ -862,7 +856,7 @@ function App() {
                               </td>
                               <td className="py-2.5 text-right">
                                 <div className="flex items-center justify-end gap-1.5">
-                                  <button 
+                                  <button
                                     onClick={() => triggerDevicePing(device.name)}
                                     className="px-2 py-0.5 text-[9px] font-bold border border-slate-500/20 hover:border-slate-500/40 rounded text-slate-400 hover:text-slate-200"
                                     title="Ping Sensor"
@@ -870,13 +864,12 @@ function App() {
                                   >
                                     Ping
                                   </button>
-                                  <button 
+                                  <button
                                     onClick={() => toggleDeviceStatus(device.id)}
-                                    className={`px-2 py-0.5 text-[9px] font-bold rounded ${
-                                      isOffline 
-                                        ? 'bg-green-600/20 text-green-400 hover:bg-green-600/35' 
-                                        : 'bg-red-600/20 text-red-400 hover:bg-red-600/35'
-                                    }`}
+                                    className={`px-2 py-0.5 text-[9px] font-bold rounded ${isOffline
+                                      ? 'bg-green-600/20 text-green-400 hover:bg-green-600/35'
+                                      : 'bg-red-600/20 text-red-400 hover:bg-red-600/35'
+                                      }`}
                                   >
                                     {isOffline ? 'Power On' : 'Kill'}
                                   </button>
@@ -902,7 +895,7 @@ function App() {
                       )}
                     </div>
                     {alerts.some(a => a.status === 'Resolved') && (
-                      <button 
+                      <button
                         onClick={handleClearResolvedAlerts}
                         className="text-[9px] text-slate-500 hover:text-slate-300 flex items-center gap-1 font-semibold"
                       >
@@ -925,36 +918,34 @@ function App() {
                         const isNormal = alert.severity === 'Normal';
 
                         return (
-                          <div 
-                            key={alert.id} 
-                            className={`p-3 rounded-lg border ${borderStyle} ${
-                              alert.status === 'Resolved' 
-                                ? 'opacity-50 bg-slate-500/5' 
-                                : isCritical 
-                                  ? 'bg-red-500/5 border-red-500/20' 
-                                  : isWarning 
-                                    ? 'bg-amber-500/5 border-amber-500/20' 
-                                    : 'bg-green-500/5 border-green-500/20'
-                            }`}
+                          <div
+                            key={alert.id}
+                            className={`p-3 rounded-lg border ${borderStyle} ${alert.status === 'Resolved'
+                              ? 'opacity-50 bg-slate-500/5'
+                              : isCritical
+                                ? 'bg-red-500/5 border-red-500/20'
+                                : isWarning
+                                  ? 'bg-amber-500/5 border-amber-500/20'
+                                  : 'bg-green-500/5 border-green-500/20'
+                              }`}
                           >
                             <div className="flex justify-between items-start">
                               <div>
-                                <span className={`text-[10px] font-bold uppercase px-1.5 py-0.5 rounded ${
-                                  isCritical 
-                                    ? 'bg-red-500/20 text-red-400' 
-                                    : isWarning 
-                                      ? 'bg-amber-500/20 text-amber-400' 
-                                      : 'bg-green-500/20 text-green-400'
-                                }`}>
+                                <span className={`text-[10px] font-bold uppercase px-1.5 py-0.5 rounded ${isCritical
+                                  ? 'bg-red-500/20 text-red-400'
+                                  : isWarning
+                                    ? 'bg-amber-500/20 text-amber-400'
+                                    : 'bg-green-500/20 text-green-400'
+                                  }`}>
                                   {alert.severity}
                                 </span>
                                 <h4 className="text-xs font-bold font-heading mt-1.5 text-slate-200 dark:text-slate-100">{alert.type}</h4>
                                 <span className="text-[10px] text-slate-500 block mt-0.5">Device: {alert.device} · {alert.time}</span>
                               </div>
-                              
+
                               {/* Alert action toggle */}
                               {alert.status === 'Active' && (
-                                <button 
+                                <button
                                   onClick={() => handleAcknowledgeAlert(alert.id)}
                                   className="text-[9px] bg-slate-500/20 hover:bg-slate-500/35 text-slate-400 hover:text-slate-200 px-2 py-0.5 rounded font-bold"
                                 >
@@ -962,7 +953,7 @@ function App() {
                                 </button>
                               )}
                               {alert.status === 'Acknowledged' && (
-                                <button 
+                                <button
                                   onClick={() => handleResolveAlert(alert.id, alert.device)}
                                   className="text-[9px] bg-green-600/20 hover:bg-green-600/30 text-green-400 px-2 py-0.5 rounded font-bold"
                                 >
@@ -986,7 +977,7 @@ function App() {
 
               {/* SMART INSIGHTS & RECENT ACTIVITY FEED */}
               <section className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-                
+
                 {/* 8. SMART INSIGHTS */}
                 <div className={`lg:col-span-2 p-5 rounded-xl shadow-lg ${glassStyle} flex flex-col space-y-4`}>
                   <div>
@@ -1059,7 +1050,7 @@ function App() {
                         <div key={act.id} className="relative flex flex-col items-start text-xs">
                           {/* Timeline dot */}
                           <span className={`absolute -left-[29px] top-1.5 w-3 h-3 rounded-full ${dotColor}`}></span>
-                          
+
                           <span className="font-semibold text-slate-300 dark:text-slate-200">{act.text}</span>
                           <span className="text-[10px] text-slate-500 mt-0.5">{act.time}</span>
                         </div>
@@ -1082,7 +1073,7 @@ function App() {
                   <h2 className="text-base font-bold font-heading m-0">Connected Sensor Registry</h2>
                   <p className="text-xs text-slate-500">Configure thresholds, names, and zones for all nodes</p>
                 </div>
-                <button 
+                <button
                   onClick={handleAddDevice}
                   className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold bg-blue-600 hover:bg-blue-500 text-white rounded-lg shadow"
                 >
@@ -1095,8 +1086,8 @@ function App() {
                 {devices.map(device => {
                   const isOffline = device.status === 'offline';
                   return (
-                    <div 
-                      key={device.id} 
+                    <div
+                      key={device.id}
                       className={`p-4 rounded-xl border ${borderStyle} ${subCardBg} flex flex-col justify-between space-y-3 relative overflow-hidden`}
                     >
                       <div className="flex justify-between items-start">
@@ -1104,13 +1095,12 @@ function App() {
                           <span className="text-[10px] text-slate-500 font-mono block uppercase">{device.id}</span>
                           <h3 className="text-sm font-bold font-heading text-slate-200 dark:text-slate-100">{device.name}</h3>
                         </div>
-                        <span className={`text-[10px] font-bold uppercase px-2 py-0.5 rounded-full ${
-                          device.status === 'online' 
-                            ? 'bg-green-500/15 text-green-400' 
-                            : device.status === 'warning' 
-                              ? 'bg-amber-500/15 text-amber-400' 
-                              : 'bg-red-500/15 text-red-400'
-                        }`}>
+                        <span className={`text-[10px] font-bold uppercase px-2 py-0.5 rounded-full ${device.status === 'online'
+                          ? 'bg-green-500/15 text-green-400'
+                          : device.status === 'warning'
+                            ? 'bg-amber-500/15 text-amber-400'
+                            : 'bg-red-500/15 text-red-400'
+                          }`}>
                           {device.status}
                         </span>
                       </div>
@@ -1141,18 +1131,17 @@ function App() {
 
                       {/* Device Action toolbar */}
                       <div className="flex gap-2 pt-2 border-t border-slate-500/5">
-                        <button 
+                        <button
                           onClick={() => triggerDevicePing(device.name)}
                           disabled={isOffline}
                           className="flex-1 py-1 text-xs font-semibold bg-slate-500/10 hover:bg-slate-500/20 text-slate-300 rounded border border-slate-500/10 disabled:opacity-50 disabled:pointer-events-none"
                         >
                           Ping Diagnostics
                         </button>
-                        <button 
+                        <button
                           onClick={() => toggleDeviceStatus(device.id)}
-                          className={`flex-1 py-1 text-xs font-semibold rounded text-white ${
-                            isOffline ? 'bg-green-600 hover:bg-green-500' : 'bg-red-600 hover:bg-red-500'
-                          }`}
+                          className={`flex-1 py-1 text-xs font-semibold rounded text-white ${isOffline ? 'bg-green-600 hover:bg-green-500' : 'bg-red-600 hover:bg-red-500'
+                            }`}
                         >
                           {isOffline ? 'Power On' : 'Decommission'}
                         </button>
@@ -1179,11 +1168,10 @@ function App() {
                     <button
                       key={period}
                       onClick={() => setTimePeriod(period)}
-                      className={`text-xs px-3 py-1 rounded-md font-bold transition-all ${
-                        timePeriod === period 
-                          ? 'bg-blue-600 text-white shadow-sm' 
-                          : 'text-slate-400 hover:text-slate-200'
-                      }`}
+                      className={`text-xs px-3 py-1 rounded-md font-bold transition-all ${timePeriod === period
+                        ? 'bg-blue-600 text-white shadow-sm'
+                        : 'text-slate-400 hover:text-slate-200'
+                        }`}
                     >
                       {period}
                     </button>
@@ -1200,8 +1188,8 @@ function App() {
                       <AreaChart data={currentChartSet} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
                         <defs>
                           <linearGradient id="colorTempBig" x1="0" y1="0" x2="0" y2="1">
-                            <stop offset="5%" stopColor="#f97316" stopOpacity={0.6}/>
-                            <stop offset="95%" stopColor="#f97316" stopOpacity={0}/>
+                            <stop offset="5%" stopColor="#f97316" stopOpacity={0.6} />
+                            <stop offset="95%" stopColor="#f97316" stopOpacity={0} />
                           </linearGradient>
                         </defs>
                         <CartesianGrid strokeDasharray="3 3" vertical={false} stroke={darkMode ? "rgba(255,255,255,0.05)" : "rgba(0,0,0,0.05)"} />
@@ -1223,8 +1211,8 @@ function App() {
                         <AreaChart data={currentChartSet} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
                           <defs>
                             <linearGradient id="colorHumBig" x1="0" y1="0" x2="0" y2="1">
-                              <stop offset="5%" stopColor="#06b6d4" stopOpacity={0.6}/>
-                              <stop offset="95%" stopColor="#06b6d4" stopOpacity={0}/>
+                              <stop offset="5%" stopColor="#06b6d4" stopOpacity={0.6} />
+                              <stop offset="95%" stopColor="#06b6d4" stopOpacity={0} />
                             </linearGradient>
                           </defs>
                           <CartesianGrid strokeDasharray="3 3" vertical={false} stroke={darkMode ? "rgba(255,255,255,0.05)" : "rgba(0,0,0,0.05)"} />
@@ -1245,8 +1233,8 @@ function App() {
                         <AreaChart data={currentChartSet} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
                           <defs>
                             <linearGradient id="colorGasBig" x1="0" y1="0" x2="0" y2="1">
-                              <stop offset="5%" stopColor="#a855f7" stopOpacity={0.6}/>
-                              <stop offset="95%" stopColor="#a855f7" stopOpacity={0}/>
+                              <stop offset="5%" stopColor="#a855f7" stopOpacity={0.6} />
+                              <stop offset="95%" stopColor="#a855f7" stopOpacity={0} />
                             </linearGradient>
                           </defs>
                           <CartesianGrid strokeDasharray="3 3" vertical={false} stroke={darkMode ? "rgba(255,255,255,0.05)" : "rgba(0,0,0,0.05)"} />
@@ -1274,7 +1262,7 @@ function App() {
                   <p className="text-xs text-slate-500">Acknowledge, isolate, or resolve current telemetry issues</p>
                 </div>
                 <div className="flex gap-2">
-                  <button 
+                  <button
                     onClick={() => {
                       setAlerts(prev => prev.map(a => ({ ...a, status: 'Resolved' })));
                       setDevices(d => d.map(dev => ({ ...dev, status: 'online' })));
@@ -1284,7 +1272,7 @@ function App() {
                     Resolve All Active
                   </button>
                   {alerts.some(a => a.status === 'Resolved') && (
-                    <button 
+                    <button
                       onClick={handleClearResolvedAlerts}
                       className="px-3 py-1.5 text-xs font-semibold bg-slate-500/15 hover:bg-slate-500/25 text-slate-300 rounded-lg border border-slate-500/20"
                     >
@@ -1299,38 +1287,35 @@ function App() {
                   const isCritical = alert.severity === 'Critical';
                   const isWarning = alert.severity === 'Warning';
                   return (
-                    <div 
+                    <div
                       key={alert.id}
                       className={`p-4 rounded-xl border ${borderStyle} ${subCardBg} flex justify-between items-center`}
                     >
                       <div className="flex items-start gap-3">
-                        <div className={`p-2 rounded-lg ${
-                          isCritical ? 'bg-red-500/10 text-red-400' : isWarning ? 'bg-amber-500/10 text-amber-400' : 'bg-green-500/10 text-green-400'
-                        }`}>
+                        <div className={`p-2 rounded-lg ${isCritical ? 'bg-red-500/10 text-red-400' : isWarning ? 'bg-amber-500/10 text-amber-400' : 'bg-green-500/10 text-green-400'
+                          }`}>
                           <ShieldAlert className="w-5 h-5" />
                         </div>
                         <div>
                           <div className="flex items-center gap-2">
                             <h3 className="text-sm font-bold font-heading">{alert.type}</h3>
-                            <span className={`text-[9px] font-bold px-2 py-0.5 rounded-full ${
-                              isCritical ? 'bg-red-500/20 text-red-400' : isWarning ? 'bg-amber-500/20 text-amber-400' : 'bg-green-500/20 text-green-400'
-                            }`}>
+                            <span className={`text-[9px] font-bold px-2 py-0.5 rounded-full ${isCritical ? 'bg-red-500/20 text-red-400' : isWarning ? 'bg-amber-500/20 text-amber-400' : 'bg-green-500/20 text-green-400'
+                              }`}>
                               {alert.severity}
                             </span>
                           </div>
                           <p className="text-xs text-slate-400 mt-1">Sensor: <span className="font-semibold">{alert.device}</span> · Logged at: {alert.time}</p>
                           <div className="mt-2 flex items-center gap-1.5">
                             <span className="text-[10px] text-slate-500">Status:</span>
-                            <span className={`text-[10px] font-bold ${
-                              alert.status === 'Active' ? 'text-red-400' : alert.status === 'Acknowledged' ? 'text-amber-400' : 'text-green-400'
-                            }`}>{alert.status}</span>
+                            <span className={`text-[10px] font-bold ${alert.status === 'Active' ? 'text-red-400' : alert.status === 'Acknowledged' ? 'text-amber-400' : 'text-green-400'
+                              }`}>{alert.status}</span>
                           </div>
                         </div>
                       </div>
 
                       <div className="flex gap-2">
                         {alert.status === 'Active' && (
-                          <button 
+                          <button
                             onClick={() => handleAcknowledgeAlert(alert.id)}
                             className="px-3 py-1.5 text-xs font-semibold bg-amber-600/20 hover:bg-amber-600/30 text-amber-400 rounded-lg"
                           >
@@ -1338,7 +1323,7 @@ function App() {
                           </button>
                         )}
                         {alert.status === 'Acknowledged' && (
-                          <button 
+                          <button
                             onClick={() => handleResolveAlert(alert.id, alert.device)}
                             className="px-3 py-1.5 text-xs font-semibold bg-green-600/20 hover:bg-green-600/30 text-green-400 rounded-lg"
                           >
@@ -1466,13 +1451,13 @@ function App() {
                     <div>
                       <label className="block text-xs text-slate-400 mb-1.5 font-bold">Temperature warning threshold (°C)</label>
                       <div className="flex items-center gap-3">
-                        <input 
-                          type="range" 
-                          min="15" 
-                          max="40" 
+                        <input
+                          type="range"
+                          min="15"
+                          max="40"
                           value={tempThreshold}
                           onChange={(e) => setTempThreshold(Number(e.target.value))}
-                          className="flex-1 accent-blue-500 h-1.5 rounded-lg bg-slate-500/20 appearance-none" 
+                          className="flex-1 accent-blue-500 h-1.5 rounded-lg bg-slate-500/20 appearance-none"
                         />
                         <span className="font-mono text-xs font-bold text-orange-400 min-w-[40px] text-right">{tempThreshold}°C</span>
                       </div>
@@ -1481,13 +1466,13 @@ function App() {
                     <div>
                       <label className="block text-xs text-slate-400 mb-1.5 font-bold">Gas level Warning threshold (ppm)</label>
                       <div className="flex items-center gap-3">
-                        <input 
-                          type="range" 
-                          min="100" 
-                          max="800" 
+                        <input
+                          type="range"
+                          min="100"
+                          max="800"
                           value={gasThreshold}
                           onChange={(e) => setGasThreshold(Number(e.target.value))}
-                          className="flex-1 accent-blue-500 h-1.5 rounded-lg bg-slate-500/20 appearance-none" 
+                          className="flex-1 accent-blue-500 h-1.5 rounded-lg bg-slate-500/20 appearance-none"
                         />
                         <span className="font-mono text-xs font-bold text-purple-400 min-w-[40px] text-right">{gasThreshold} ppm</span>
                       </div>
@@ -1496,13 +1481,13 @@ function App() {
                     <div>
                       <label className="block text-xs text-slate-400 mb-1.5 font-bold">Telemetry Live Sync Interval (seconds)</label>
                       <div className="flex items-center gap-3">
-                        <input 
-                          type="range" 
-                          min="1" 
-                          max="15" 
+                        <input
+                          type="range"
+                          min="1"
+                          max="15"
                           value={syncInterval}
                           onChange={(e) => setSyncInterval(Number(e.target.value))}
-                          className="flex-1 accent-blue-500 h-1.5 rounded-lg bg-slate-500/20 appearance-none" 
+                          className="flex-1 accent-blue-500 h-1.5 rounded-lg bg-slate-500/20 appearance-none"
                         />
                         <span className="font-mono text-xs font-bold text-cyan-400 min-w-[40px] text-right">{syncInterval}s</span>
                       </div>
@@ -1520,9 +1505,9 @@ function App() {
                   <div className="space-y-3">
                     <div>
                       <label className="block text-xs text-slate-400 mb-1">Operator Name</label>
-                      <input 
-                        type="text" 
-                        value={profileName} 
+                      <input
+                        type="text"
+                        value={profileName}
                         onChange={(e) => setProfileName(e.target.value)}
                         className={`w-full px-3 py-1.5 text-xs rounded-lg border ${borderStyle} bg-slate-500/5 focus:outline-none focus:border-blue-500`}
                       />
@@ -1530,9 +1515,9 @@ function App() {
 
                     <div>
                       <label className="block text-xs text-slate-400 mb-1">System Role</label>
-                      <input 
-                        type="text" 
-                        value={profileRole} 
+                      <input
+                        type="text"
+                        value={profileRole}
                         onChange={(e) => setProfileRole(e.target.value)}
                         className={`w-full px-3 py-1.5 text-xs rounded-lg border ${borderStyle} bg-slate-500/5 focus:outline-none focus:border-blue-500`}
                       />
